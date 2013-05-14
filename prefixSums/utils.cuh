@@ -1,17 +1,12 @@
 #ifndef __BRAHLE_CUDA_UTILS
 #define __BRAHLE_CUDA_UTILS
 
-#include <algorithm>
-#include <iostream>
-#include <cstdlib>
-#include <climits>
-
 #include "cub/cub.cuh"
 
-struct DeviceMaxOperator {
-  __device__ DeviceMaxOperator() {}
+struct MaxOperator {
+  __device__ __host__ MaxOperator() {}
 
-  __device__ int operator() (const int &A, const int &B) const {
+  __device__ __host__ int operator() (const int &A, const int &B) const {
     if (A < B) return B;
     return A;
   }
@@ -24,7 +19,7 @@ inline __device__ int max2(int a, int b) {
   return b;
 }
 
-inline __device__ int max3(int a, int b, int c) {
+inline __device__ __host__ int max3(int a, int b, int c) {
   if (a >= b) {
     if (a >= c) {
       return a;

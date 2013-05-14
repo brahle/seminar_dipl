@@ -1,11 +1,12 @@
 #include "utils.cuh"
+#include "utils.h"
 
 using namespace std;
 
 const int INF = 0x3f3f3f3f;
 
-const int THREADS = 5;
-const int ITEMS_PER_THREAD = 1;
+const int THREADS = 2;
+const int ITEMS_PER_THREAD = 1000;
 const int N = THREADS * ITEMS_PER_THREAD;
 
 const int H = 3; // penalty for the start of the gap
@@ -48,8 +49,7 @@ __global__ void calculateT2(int *T2_new, int *T1_new, int *T2_old, int *T3_new) 
 
   typedef cub::BlockScan<int, THREADS> BlockScan;
   __shared__ typename BlockScan::SmemStorage smem_storage;
-
-  BlockScan::ExclusiveScan(smem_storage, W, W, 0, DeviceMaxOperator());
+  BlockScan::ExclusiveScan(smem_storage, W, W, 0, MaxOperator());
 
   for (int j = ITEMS_PER_THREAD*threadIdx.x, jj = 0; j < ITEMS_PER_THREAD*(threadIdx.x+1); ++j, ++jj) {
     if (j) {
@@ -60,22 +60,22 @@ __global__ void calculateT2(int *T2_new, int *T1_new, int *T2_old, int *T3_new) 
   }
 }
 
+int T1[2][N];
+int T2[2][N];
+int T3[2][N];
+char A[N], B[N];
+
 int main(void) {
-  char A[N], B[N];
 	for (int i = 0; i+1 < N; ++i) {
     A[i] = "ABCD"[rand()%4];
     B[i] = "ABCD"[rand()%4];
   }
   A[N-1] = 0;
   B[N-1] = 0;
-  puts(A);
-  puts(B);
+//  puts(A);
+//  puts(B);
 
-  int T1[2][N];
-  int T2[2][N];
-  int T3[2][N];
-
-  int now = 0;
+  int now = 0, old = 1;
   for (int j = 0; j < N; ++j) {
     T1[0][j] = -INF;
     T2[0][j] = -H - G*j;
@@ -87,50 +87,51 @@ int main(void) {
   T1[0][0] = 0;
   T3[0][0] = -H;
 
-  int *T1_old, *T1_new;
-  int *T2_old, *T2_new;
-  int *T3_old, *T3_new;
+  int *dev_T1[2];
+  int *dev_T2[2];
+  int *dev_T3[2];
   char *dev_A, *dev_B;
 
-  cudaMalloc(&T1_new, N*sizeof(int));
-  cudaMalloc(&T2_new, N*sizeof(int));
-  cudaMalloc(&T3_new, N*sizeof(int));
-  cudaMalloc(&T1_old, N*sizeof(int));
-  cudaMalloc(&T2_old, N*sizeof(int));
-  cudaMalloc(&T3_old, N*sizeof(int));
+  for (int i = 0; i < 2; ++i) {
+    cudaMalloc(&dev_T1[i], N*sizeof(int));
+    cudaMemcpy(dev_T1[i], T1[i], N*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&dev_T2[i], N*sizeof(int));
+    cudaMemcpy(dev_T2[i], T2[i], N*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&dev_T3[i], N*sizeof(int));
+    cudaMemcpy(dev_T3[i], T3[i], N*sizeof(int), cudaMemcpyHostToDevice);
+  }
   cudaMalloc(&dev_A, N*sizeof(char));
   cudaMalloc(&dev_B, N*sizeof(char));
-
   cudaMemcpy(dev_A, A, N*sizeof(char), cudaMemcpyHostToDevice);
   cudaMemcpy(dev_B, B, N*sizeof(char), cudaMemcpyHostToDevice);
 
+  clock_t start_time = clock();
+
   for (int i = 1; i < N; ++i) {
-    if (i == 1) {
-      for (int j = 0; j < N; ++j) {
-        printf("%12d%12d%12d; ", T1[!now][j], T2[!now][j], T3[!now][j]);
-      }
-      printf("\n");
-    }
-
-    printf("Gledam za znak %c\n", A[i-1]);
     now ^= 1;
-    cudaMemcpy(T1_old, T1[!now], N*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(T2_old, T2[!now], N*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(T3_old, T3[!now], N*sizeof(int), cudaMemcpyHostToDevice);
+    old = (now ^ 1);
 
-    calculateT1<<<1, THREADS>>>(T1_new, T1_old, T2_old, T3_old, A[i-1], dev_B);
-    calculateT3<<<1, THREADS>>>(T3_new, T1_old, T2_old, T3_old, i);
-    calculateT2<<<1, THREADS>>>(T2_new, T1_new, T2_old, T3_new);
-
-    cudaMemcpy(T1[now], T1_new, N*sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(T2[now], T2_new, N*sizeof(int), cudaMemcpyDeviceToHost);
-    cudaMemcpy(T3[now], T3_new, N*sizeof(int), cudaMemcpyDeviceToHost);
-
-    for (int j = 0; j < N; ++j) {
-      printf("%12d%12d%12d; ", T1[now][j], T2[now][j], T3[now][j]);
-    }
-    printf("\n");
+    calculateT1<<<1, THREADS>>>(dev_T1[now], dev_T1[old], dev_T2[old], dev_T3[old], A[i-1], dev_B);
+    calculateT3<<<1, THREADS>>>(dev_T3[now], dev_T1[old], dev_T2[old], dev_T3[old], i);
+    calculateT2<<<1, THREADS>>>(dev_T2[now], dev_T1[now], dev_T2[old], dev_T3[now]);
   }
+
+  cudaMemcpy(T1[0], dev_T1[now], N*sizeof(int), cudaMemcpyDeviceToHost);
+  cudaMemcpy(T2[0], dev_T2[now], N*sizeof(int), cudaMemcpyDeviceToHost);
+  cudaMemcpy(T3[0], dev_T3[now], N*sizeof(int), cudaMemcpyDeviceToHost);
+
+  printf("Maximum complete alignment is %d.\n", max3(T1[0][N-1], T2[0][N-1], T3[0][N-1]));
+
+  clock_t end_time = clock();
+  printf("Clock = %d ticks = %.4gs\n", end_time-start_time, (end_time-start_time)/(double)CLK_TCK);
+
+  for (int i = 0; i < 2; ++i) {
+    cudaFree(dev_T1[i]);
+    cudaFree(dev_T2[i]);
+    cudaFree(dev_T3[i]);
+  }
+  cudaFree(dev_A);
+  cudaFree(dev_B);
 
 	system("pause");
 	return 0;
