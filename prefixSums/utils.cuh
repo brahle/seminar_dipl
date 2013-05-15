@@ -28,6 +28,13 @@ inline __device__ int max2(int a, int b) {
   return b;
 }
 
+inline __device__ int min2(int a, int b) {
+  if (a < b) { 
+    return a;
+  }
+  return b;
+}
+
 inline __device__ __host__ int max3(int a, int b, int c) {
   if (a >= b) {
     if (a >= c) {
