@@ -6,7 +6,7 @@ using namespace std;
 const int INF = 0x3f3f3f3f;
 
 const int THREADS = 2;
-const int ITEMS_PER_THREAD = 1000;
+const int ITEMS_PER_THREAD = 500;
 const int N = THREADS * ITEMS_PER_THREAD;
 
 const int H = 3; // penalty for the start of the gap
@@ -17,48 +17,62 @@ inline __device__ int f(char A, char B) {
 }
 
 __global__ void calculateT1(int *T1_new, int *T1_old, int *T2_old, int *T3_old, char A, char *B) {
-  for (int j = ITEMS_PER_THREAD*threadIdx.x; j < ITEMS_PER_THREAD*(threadIdx.x+1); ++j) {
-    if (j) {
-      T1_new[j] = f(A, B[j-1]) + max3(T1_old[j-1], T2_old[j-1], T3_old[j-1]);
-    } else {
-      T1_new[j] = -INF;
-    }
+  register int j = ITEMS_PER_THREAD*threadIdx.x;
+  register int end = ITEMS_PER_THREAD*(threadIdx.x+1);
+
+  if (j == 0) {
+    T1_new[j] = -INF;
+    ++j;
+  }
+  for (; j < end; ++j) {
+    T1_new[j] = f(A, B[j-1]) + max3(T1_old[j-1], T2_old[j-1], T3_old[j-1]);
   }
 }
 
 __global__ void calculateT3(int *T3_new, int *T1_old, int *T2_old, int *T3_old, int i) {
-  for (int j = ITEMS_PER_THREAD*threadIdx.x; j < ITEMS_PER_THREAD*(threadIdx.x+1); ++j) {
-    if (j) {
-      T3_new[j] = max3(T1_old[j]-H, T2_old[j]-H, T3_old[j])-G;
-    } else {
-      T3_new[j] = -H - G*i;
-    }
+  register int j = ITEMS_PER_THREAD*threadIdx.x;
+  register int end = ITEMS_PER_THREAD*(threadIdx.x+1);
+
+  if (j == 0) {
+    T3_new[j] = -H - G*i;
+    ++j;
+  }
+
+  for (; j < end; ++j) {
+    T3_new[j] = max3(T1_old[j]-H, T2_old[j]-H, T3_old[j])-G;
   }
 }
 
+
 __global__ void calculateT2(int *T2_new, int *T1_new, int *T2_old, int *T3_new) {
   int W[ITEMS_PER_THREAD];
-  for (int j = ITEMS_PER_THREAD*threadIdx.x, jj = 0; j < ITEMS_PER_THREAD*(threadIdx.x+1); ++j, ++jj) {
-    if (j) {
-      W[jj] = max2(T1_new[j-1], T3_new[j-1])-G-H;
-    } else {
-      W[jj] = -INF; 
-    }
-    W[jj] += j*G;
+  register int j = ITEMS_PER_THREAD*threadIdx.x, jj = 0;
+  register int end = ITEMS_PER_THREAD*(threadIdx.x+1);
+
+  if (j == 0) {
+    W[j] = -INF;
+    ++j; ++jj;
+  }
+  for (; j < end; ++j, ++jj) {
+    W[jj] = max2(T1_new[j-1], T3_new[j-1]) - G - H + j*G;
   }
 
   typedef cub::BlockScan<int, THREADS> BlockScan;
   __shared__ typename BlockScan::SmemStorage smem_storage;
   BlockScan::ExclusiveScan(smem_storage, W, W, 0, MaxOperator());
 
-  for (int j = ITEMS_PER_THREAD*threadIdx.x, jj = 0; j < ITEMS_PER_THREAD*(threadIdx.x+1); ++j, ++jj) {
-    if (j) {
-      T2_new[j] = W[jj] - j*G;
-    } else {
-      T2_new[j] = -INF;
-    }
+  j = ITEMS_PER_THREAD*threadIdx.x;
+  jj = 0;
+
+  if (j == 0) {
+    T2_new[j] = -INF;
+    ++j; ++jj;
+  }
+  for (; j < end; ++j, ++jj) {
+    T2_new[j] = W[jj] - j*G;
   }
 }
+
 
 int T1[2][N];
 int T2[2][N];
@@ -72,8 +86,6 @@ int main(void) {
   }
   A[N-1] = 0;
   B[N-1] = 0;
-//  puts(A);
-//  puts(B);
 
   int now = 0, old = 1;
   for (int j = 0; j < N; ++j) {
