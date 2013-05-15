@@ -11,11 +11,18 @@
         exit(err); }
 
 
+struct IndexedValue {
+  int value, index;
+  __device__ __host__ __forceinline__ bool operator< (const IndexedValue &other) const {
+    if (index != other.index) return index > other.index;
+    return value < other.value;
+  }
+};
 
-struct MaxOperator {
+template< typename T > struct MaxOperator {
   __device__ __host__ MaxOperator() {}
 
-  __device__ __host__ int operator() (const int &A, const int &B) const {
+  __device__ __host__ T operator() (const T &A, const T &B) const {
     if (A < B) return B;
     return A;
   }
